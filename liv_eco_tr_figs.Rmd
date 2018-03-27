@@ -1,0 +1,253 @@
+---
+title: "Livelihoods & Economies Focus Group figures"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE, warning = F, message = F}
+
+knitr::opts_chunk$set(echo = TRUE, warning= F, message = F)
+
+library(tidyverse)
+library(readxl)
+
+dir_layers <- '~/github/ohi-northeast/region2016/layers/'
+
+# set the mazu data_edit share based on operating system
+dir_M             <- c('Windows' = '//mazu.nceas.ucsb.edu/ohi',
+                       'Darwin'  = '/Volumes/ohi',    ### connect (cmd-K) to smb://mazu/ohi
+                       'Linux'   = '/home/shares/ohi')[[ Sys.info()[['sysname']] ]]
+
+options(scipen = 999)
+```
+
+# Livelihoods & Economies
+
+Livelihoods & Economies is made up of two distinct components: **Jobs** and **Wages**. We will use only Connecticut data from NOEP to exemplify how this goal is calculated.
+
+##Jobs
+
+### Sectors
+```{r}
+jobs_sector <- read_excel(file.path(dir_M, 'git-annex/neprep/_raw_data/NOEP/New_England_ocean_series.xlsx'), sheet = "ENOW") %>%
+  filter(State == "Maine",
+         County == "All Maine counties") %>%
+  mutate(jobs = as.numeric(Employment),
+         wages = as.numeric(Wages_2012))
+
+ggplot(jobs_sector, aes(x = Year, y = jobs, color = Sector)) +
+  geom_line() +
+  theme_minimal() +
+  scale_x_continuous(breaks=seq(2005, 2014, 1)) +
+  ylab("Number of jobs") +
+  ggtitle("Employment")
+
+ggsave("figs/jobs_sectors.pdf", width = 6, height = 4)
+```
+
+
+```{r}
+le_cst_jobs_ref <- read_csv(file.path(dir_layers, 'le_coast_jobs_ref.csv')) %>%
+  filter(state == "Maine") %>%
+  select(-X1)
+
+le_usa_jobs <- read_csv(file.path(dir_layers, 'le_usa_jobs.csv')) %>% 
+  select(-X1)
+
+le_cst_jobs <- read_csv(file.path(dir_layers, 'le_coast_jobs.csv')) %>%
+  filter(state == "Maine") %>%
+  select(-X1)
+
+##coastal jobs
+  coast_jobs <- le_cst_jobs %>%
+    rename(coast_jobs = rgn_employment) %>%
+    left_join(le_cst_jobs_ref) %>%    #join with the reference point data
+    filter(!is.na(ref)) %>%     #remove years with NA for mean jobs (same as removing years pre-2010)
+    rename(coast_mean_jobs = ref) %>%
+    mutate(cst_chg = coast_jobs/coast_mean_jobs)
+  
+#combine coastal and state data, calculate jobs scores
+  jobs_score <- coast_jobs %>%
+    left_join(le_usa_jobs) %>%
+    mutate(job_score = ifelse(cst_chg > us_job_growth, 1, cst_chg/us_job_growth) * 100) %>%
+    gather(key = category, value = score, -state, -year, -rgn_id, -rgn_name, -coast_jobs, -coast_mean_jobs) %>%
+    mutate(score = (score - 1) * 100)
+```
+
+```{r}
+ggplot(jobs_score %>% filter(category != "job_score"), aes(x = year, y = score, color = category)) +
+  geom_line(size = 1.5) +
+  theme_minimal() +
+  scale_color_manual(labels = c("NE State", "Nationwide"), values = c("cadetblue3", "cadetblue4")) +
+  ylab("Job growth rate (%)") +
+  xlab("Year") +
+  ggtitle("Annual job growth") +
+  theme(legend.title = element_blank()) +
+  geom_hline(yintercept = 0, linetype = 'dashed')
+
+ggsave("figs/job_growth.pdf", width = 6, height = 4)
+```
+
+
+## Wages
+```{r}
+## Calculate avg annual wage per job
+wages <- jobs_sector %>%
+  mutate(wages_per_job = wages/jobs)
+
+ggplot(wages, aes(x = Year, y = wages_per_job, color = Sector)) +
+  geom_line() +
+  theme_minimal() +
+  scale_x_continuous(breaks=seq(2005, 2014, 1)) +
+  ylab("Wages (2012 $USD)") +
+  ggtitle("Average Annual Wages")
+
+
+ggsave("figs/wages_sectors.pdf", width = 6, height = 4)
+```
+
+### Wage growth
+```{r}
+
+le_cst_wages <- read_csv(file.path(dir_layers, 'le_coast_wages.csv')) %>%
+  filter(state == "Connecticut") %>%
+  select(-X1)
+  
+le_cst_wages_ref <- read_csv(file.path(dir_layers, 'le_coast_wages_ref.csv')) %>%
+  filter(state == "Connecticut") %>%
+  select(-X1)
+  
+
+  ## Wages scores
+  #combining the coastal wage data and calculate the change
+  coast_wages <- le_cst_wages %>%
+    rename(coast_wages = wages_per_job) %>%
+    left_join(le_cst_wages_ref) %>%    #join with the reference point data
+    filter(!is.na(ref)) %>%       #remove years with NA for wages (same as removing years pre-2010)
+    rename(coast_mean_wages = ref) %>%
+    mutate(cst_chg = coast_wages/coast_mean_wages)
+  
+  #combine coastal and state data, calculate
+  wages_score <- coast_wages %>%
+    mutate(wages_score = ifelse(cst_chg > 1.035, 1, cst_chg/1.035)*100,
+           perc = (cst_chg-1)*100)
+  
+```
+
+```{r}
+ggplot(wages_score, aes(x = year, y = perc)) +
+  geom_line() +
+  geom_hline(yintercept = 3.5, color = 'red', linetype = 'dashed') +
+  ylab("Wage growth (%)") +
+  ggtitle("Average annual wage growth") +
+  annotate("text", x = 2012, y = 4, label = "Wage Growth Target (3.5%)*", color = "red", size = 3) +
+  theme_minimal() +
+  xlab("Year")
+
+
+ggsave("figs/wage_growth.pdf", width = 6, height = 4)
+```
+
+## Economies
+
+```{r}
+
+usa_gdp <- read_csv(file.path(dir_layers, "eco_usa_gdp.csv")) %>%
+  select(-X1)
+
+ggplot(usa_gdp, aes(x = year, y = GDP_growth_rate)) +
+  geom_line() +
+  theme_minimal() +
+  ylab("Growth Rate (%)") +
+  xlab("Year") +
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'red') +
+  ggtitle("United States Gross Domestic Product Growth Rate")
+
+
+ggsave("figs/usa_gdp_growth.pdf", width = 6, height = 4)
+```
+
+
+
+```{r}
+cst_gdp <- read_csv(file.path(dir_layers, "eco_coast_gdp.csv")) %>%
+  select(-X1) %>%
+  filter(state == "Rhode Island")
+
+
+ggplot(cst_gdp, aes(x = year, y = (cst_chg-1)*100)) +
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'red') +
+  geom_line() +
+  ylab("Annual GDP growth rate (%)") +
+  xlab("Year") +
+  ggtitle("Northeast state GDP growth rate") +
+  theme_minimal() +
+  theme(legend.position="none")
+
+ggsave("figs/ne_state_gdp_growth.pdf", width = 6, height = 4)
+```
+
+
+```{r}
+both <- cst_gdp %>%
+  left_join(usa_gdp) %>%
+  mutate(cst_chg = (cst_chg-1)*100) %>%
+  gather(key = "region", value = "gdp_growth_rate", cst_chg, GDP_growth_rate) 
+
+ggplot(both, aes(x = year, y = gdp_growth_rate, color = region)) +
+  geom_line(size = 1.5) +
+  theme_minimal() +
+  geom_hline(yintercept = 0, linetype = 'dashed') +
+  scale_color_manual(labels = c("NE State", "Nationwide"), values = c("cadetblue3", "cadetblue4")) +
+  ylab("Annual GDP growth rate (%)") +
+  xlab("Year") +
+  theme(legend.title = element_blank()) +
+  ggtitle("GDP Growth over time")
+
+ggsave("figs/gdp_growth.pdf", width = 6, height = 4)
+```
+
+***
+
+# Tourism
+
+```{r}
+
+jobs_sector <- read_excel(file.path(dir_M, 'git-annex/neprep/_raw_data/NOEP/New_England_ocean_series.xlsx'), sheet = "ENOW") %>%
+  filter(State == "Maine",
+         County == "All Maine counties") %>%
+  mutate(jobs = as.numeric(Employment),
+         wages = as.numeric(Wages_2012),
+         line_width = ifelse(Sector == "Tourism & Recreation", 3, 1)) #adding this column just to make the width of the line bigger
+
+ggplot(jobs_sector, aes(x = Year, y = jobs, color = Sector, size=line_width)) +
+  geom_line() +
+  theme_minimal() +
+  scale_x_continuous(breaks=seq(2005, 2014, 1)) +
+  ylab("Number of jobs") +
+  ggtitle("Employment") +
+  guides(size = F)
+
+ggsave("figs/tr_jobs.pdf", width = 6, height = 4)
+```
+
+
+
+
+
+
+
+
+
+
+
